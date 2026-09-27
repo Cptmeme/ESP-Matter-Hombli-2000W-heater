@@ -7,10 +7,9 @@
 #include "esp_openthread_types.h"
 #endif
 
-// PIN CONFIG - wired to the heater MCU (matches the ESPHome reverse-engineering).
-// ESP TX (GPIO7) -> heater MCU RX ; ESP RX (GPIO6) <- heater MCU TX.
-#define TUYA_TX_PIN 7
-#define TUYA_RX_PIN 6
+// PIN CONFIG (Non-Conflicting with Console)
+#define TUYA_TX_PIN 16
+#define TUYA_RX_PIN 17
 
 typedef void *app_driver_handle_t;
 

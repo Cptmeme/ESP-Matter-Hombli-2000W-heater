@@ -6,6 +6,8 @@ It replaces the original Wi-Fi firmware with a custom C++ application running on
 
 **Device:** [Hombli Smart Convector Heater 2000W](https://hombli.com/nl/collections/verwarming/products/hombli-slimme-convectorkachel-2000w-wit-glas)
 
+> Looking for the **EUROM Alutherm 1500 WiFi**? That heater speaks a different Tuya dialect and has its own firmware: [ESP-Matter-EUROM-Alutherm-1500-heater](https://github.com/Cptmeme/ESP-Matter-EUROM-Alutherm-1500-heater).
+
 ---
 
 ## 🚀 Features

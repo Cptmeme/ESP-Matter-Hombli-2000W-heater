@@ -35,8 +35,7 @@ using namespace chip::DeviceLayer;
 
 static const char *TAG = "app_main";
 uint16_t thermostat_endpoint_id = 0;
-uint16_t eco_endpoint_id = 0;
-uint16_t powerful_endpoint_id = 0;
+uint16_t screen_endpoint_id = 0;
 
 extern int16_t g_current_temp_int; 
 
@@ -181,17 +180,12 @@ extern "C" void app_main()
     endpoint_t *endpoint = esp_matter::endpoint::thermostat::create(node, &thermostat_config, ENDPOINT_FLAG_NONE, thermostat_handle);
     thermostat_endpoint_id = endpoint::get_id(endpoint);
 
-    // Eco mode (DP102) exposed as an On/Off endpoint
-    esp_matter::endpoint::on_off_plug_in_unit::config_t eco_config = {};
-    eco_config.on_off.on_off = false;
-    endpoint_t *eco_ep = esp_matter::endpoint::on_off_plug_in_unit::create(node, &eco_config, ENDPOINT_FLAG_NONE, NULL);
-    eco_endpoint_id = endpoint::get_id(eco_ep);
-
-    // Powerful / boost (DP101 = 1500 W) exposed as an On/Off endpoint
-    esp_matter::endpoint::on_off_plug_in_unit::config_t powerful_config = {};
-    powerful_config.on_off.on_off = false;
-    endpoint_t *powerful_ep = esp_matter::endpoint::on_off_plug_in_unit::create(node, &powerful_config, ENDPOINT_FLAG_NONE, NULL);
-    powerful_endpoint_id = endpoint::get_id(powerful_ep);
+    esp_matter::endpoint::on_off_plug_in_unit::config_t screen_config = {};
+    screen_config.on_off.on_off = true; // Default state: On
+    
+    // Create the endpoint
+    endpoint_t *screen_ep = esp_matter::endpoint::on_off_plug_in_unit::create(node, &screen_config, ENDPOINT_FLAG_NONE, NULL);
+    screen_endpoint_id = endpoint::get_id(screen_ep);
 
     // --- REGISTER ATTRIBUTES ---
     esp_matter::cluster_t *cluster = esp_matter::cluster::get(endpoint, Thermostat::Id);
