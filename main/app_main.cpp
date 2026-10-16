@@ -228,6 +228,8 @@ extern "C" void app_main()
 
     esp_matter::endpoint::thermostat::config_t thermostat_config = {};
     thermostat_config.thermostat.feature_flags = esp_matter::cluster::thermostat::feature::heating::get_id();
+    thermostat_config.thermostat.control_sequence_of_operation =
+        (uint8_t)Thermostat::ControlSequenceOfOperationEnum::kHeatingOnly;                  // esp-matter defaults to cool+heat
 
     endpoint_t *endpoint = esp_matter::endpoint::thermostat::create(node, &thermostat_config, ENDPOINT_FLAG_NONE, thermostat_handle);
     thermostat_endpoint_id = endpoint::get_id(endpoint);
@@ -253,11 +255,9 @@ extern "C" void app_main()
             esp_matter::attribute::create(cluster, Thermostat::Attributes::ThermostatRunningState::Id, ATTRIBUTE_FLAG_NULLABLE, esp_matter_bitmap16(0));
         }
 
-        // Force Flags
-        esp_matter_attr_val_t feature_val = esp_matter_bitmap32(1); 
-        attribute::update(thermostat_endpoint_id, Thermostat::Id, Thermostat::Attributes::FeatureMap::Id, &feature_val);
-        esp_matter_attr_val_t seq_val = esp_matter_enum8(2); 
-        attribute::update(thermostat_endpoint_id, Thermostat::Id, Thermostat::Attributes::ControlSequenceOfOperation::Id, &seq_val);
+        // FeatureMap and ControlSequenceOfOperation come from thermostat_config above. Don't
+        // attribute::update() them here: a changed value is reported, which crashes before
+        // esp_matter::start() (first boot after an erase or factory reset).
     }
 
     chip::app::AttributeAccessInterfaceRegistry::Instance().Register(&sLocalTempAccessor);
