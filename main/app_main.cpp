@@ -1,5 +1,7 @@
 #include <esp_err.h>
 #include <esp_log.h>
+#include <esp_ota_ops.h>
+#include <esp_timer.h>
 #include <nvs_flash.h>
 
 #include <esp_matter.h>
@@ -163,6 +165,56 @@ static esp_err_t app_attribute_update_cb(attribute::callback_type_t type, uint16
     return ESP_OK;
 }
 
+// --- OTA ROLLBACK ---
+// With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE an image installed by OTA boots as "pending
+// verify". Keep it once it has run for a minute and is attached to the network
+// (so it can still receive the next update); otherwise go back to the previous image.
+static esp_timer_handle_t s_ota_verify_timer;
+
+static bool app_network_up()
+{
+#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+    if (chip::DeviceLayer::ConnectivityMgr().IsThreadAttached()) return true;
+#endif
+#if CHIP_DEVICE_CONFIG_ENABLE_WIFI_STATION
+    if (chip::DeviceLayer::ConnectivityMgr().IsWiFiStationConnected()) return true;
+#endif
+    return false;
+}
+
+static void app_ota_verify_check(intptr_t)
+{
+    int64_t uptime_s = esp_timer_get_time() / 1000000;
+    if (uptime_s >= 60 && app_network_up()) {
+        esp_timer_stop(s_ota_verify_timer);
+        esp_ota_mark_app_valid_cancel_rollback();
+        ESP_LOGI(TAG, "OTA: new firmware confirmed");
+    } else if (uptime_s >= 300) {
+        ESP_LOGE(TAG, "OTA: new firmware not on the network after 5 min, rolling back");
+        esp_ota_mark_app_invalid_rollback_and_reboot();
+    }
+}
+
+static void app_ota_verify_tick(void *)
+{
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(app_ota_verify_check, 0);   // CHIP thread, stack locked
+}
+
+static void app_ota_verify_start()
+{
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY) {
+        return;
+    }
+    ESP_LOGW(TAG, "OTA: running new firmware, confirming once it is on the network");
+    esp_timer_create_args_t args = {};
+    args.callback = app_ota_verify_tick;
+    args.name = "ota_verify";
+    esp_timer_create(&args, &s_ota_verify_timer);
+    esp_timer_start_periodic(s_ota_verify_timer, 10 * 1000000);
+}
+
 extern "C" void app_main()
 {
     nvs_flash_init();
@@ -237,6 +289,7 @@ extern "C" void app_main()
 
     esp_matter::start(app_event_cb);
     app_driver_thermostat_set_defaults(thermostat_endpoint_id);
+    app_ota_verify_start();
 
     #if CONFIG_ENABLE_ENCRYPTED_OTA
     err = esp_matter_ota_requestor_encrypted_init(s_decryption_key, s_decryption_key_len);

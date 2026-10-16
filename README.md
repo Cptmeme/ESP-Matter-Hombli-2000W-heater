@@ -73,6 +73,51 @@ idf.py erase-flash
 idf.py flash monitor
 ```
 
+---
+
+## 🔄 Updating the Firmware
+
+### Versions
+
+Bump all three for every release, or the device ignores the update. The build fails if the two numbers differ.
+
+* `PROJECT_VER` (e.g. `"1.1"`) and `PROJECT_VER_NUMBER` (e.g. `2`) in `CMakeLists.txt`
+* `CONFIG_DEVICE_SOFTWARE_VERSION_NUMBER` in `sdkconfig` / `sdkconfig.defaults.esp32c6` (same number)
+
+### Over USB / serial
+
+A normal `idf.py flash` still works (skip `erase-flash` to keep the pairing). It is also the only way to write the bootloader, which the rollback below needs.
+
+### Over the air (Matter OTA over Thread)
+
+The build also produces `build/thermostat-ota.bin`, a Matter OTA image. Apple Home and Google Home only update certified devices, so you serve it yourself with the Matter SDK's host tools. Build them from the SDK with `./scripts/build/build_examples.py --target darwin-arm64-chip-tool --target darwin-arm64-ota-provider build`.
+
+One-time setup: in the Home app, turn on pairing mode for the heater, then add the provider and the heater to `chip-tool`'s fabric:
+
+```bash
+chip-tool pairing code 2 <setup-code-from-home-app>              # heater = node 2
+chip-ota-provider-app -f build/thermostat-ota.bin --discriminator 3841 --secured-device-port 5565 &
+chip-tool pairing onnetwork-long 1 20202021 3841                 # provider = node 1
+chip-tool accesscontrol write acl '[{"fabricIndex": 1, "privilege": 5, "authMode": 2, "subjects": [112233], "targets": null}, {"fabricIndex": 1, "privilege": 3, "authMode": 2, "subjects": null, "targets": [{"cluster": 41, "endpoint": null, "deviceType": null}]}]' 1 0
+```
+
+Each update (with the provider running and serving the new `thermostat-ota.bin`):
+
+```bash
+chip-tool otasoftwareupdaterequestor announce-otaprovider 1 0 2 0 2 0
+chip-tool basicinformation read software-version 2 0              # afterwards: the new number
+```
+
+The 1.5 MB image takes about 12 minutes over Thread.
+
+### Rollback
+
+After the download the heater restarts into the new version and keeps it once it has run for a minute while attached to the Thread network. If it doesn't get there within 5 minutes, or crashes before that, the bootloader automatically returns to the previous version.
+
+Rollback needs the bootloader from this build, and the bootloader can only be written over serial. A heater that has only been updated over the air still updates fine, it just won't roll back.
+
+---
+
 ## 📱 Pairing & Usage
 
 ### Apple Home
