@@ -47,7 +47,7 @@ The firmware uses the standard UART pins on the module:
 ## ⚙️ Installation & Build
 
 ### Prerequisites
-* ESP-IDF v5.2.x or v5.3.x
+* ESP-IDF v5.5.x (built with v5.5.4)
 * ESP-Matter SDK
 
 ### Configuration
