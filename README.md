@@ -30,6 +30,8 @@ The original Tuya Wi-Fi module was replaced with a **WT0132C6-S5** (ESP32-C6) mo
 * **Flash:** 4MB
 * **Communication:** UART (9600 Baud)
 
+<img src="docs/media/wt0132c6-installed.jpg" width="480" alt="WT0132C6-S5 module soldered onto the heater's control board, in place of the original Wi-Fi module">
+
 ### Wiring
 The firmware uses the standard UART pins on the module:
 
