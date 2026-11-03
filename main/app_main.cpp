@@ -48,6 +48,14 @@ using namespace chip::app::Clusters;
 
 constexpr auto k_timeout_seconds = 300;
 
+#if CONFIG_ENABLE_ENCRYPTED_OTA
+extern const char decryption_key_start[] asm("_binary_esp_image_encryption_key_pem_start");
+extern const char decryption_key_end[] asm("_binary_esp_image_encryption_key_pem_end");
+
+static const char *s_decryption_key = decryption_key_start;
+static const uint16_t s_decryption_key_len = decryption_key_end - decryption_key_start;
+#endif // CONFIG_ENABLE_ENCRYPTED_OTA
+
 #ifdef CONFIG_ENABLE_SET_CERT_DECLARATION_API
 extern const uint8_t cd_start[] asm("_binary_certification_declaration_der_start");
 extern const uint8_t cd_end[] asm("_binary_certification_declaration_der_end");
@@ -291,8 +299,8 @@ extern "C" void app_main()
     app_driver_thermostat_set_defaults(thermostat_endpoint_id);
     app_ota_verify_start();
 
-    #if CONFIG_ENABLE_ENCRYPTED_OTA
-    err = esp_matter_ota_requestor_encrypted_init(s_decryption_key, s_decryption_key_len);
+#if CONFIG_ENABLE_ENCRYPTED_OTA
+    esp_err_t err = esp_matter_ota_requestor_encrypted_init(s_decryption_key, s_decryption_key_len);
     ABORT_APP_ON_FAILURE(err == ESP_OK, ESP_LOGE(TAG, "Failed to initialized the encrypted OTA, err: %d", err));
 #endif // CONFIG_ENABLE_ENCRYPTED_OTA
 
