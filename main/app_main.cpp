@@ -263,6 +263,14 @@ extern "C" void app_main()
             esp_matter::attribute::create(cluster, Thermostat::Attributes::ThermostatRunningState::Id, ATTRIBUTE_FLAG_NULLABLE, esp_matter_bitmap16(0));
         }
 
+        // The setpoint saved before this boot: the driver sends it back after a power cut,
+        // when the heater has reset its own (see RunRestore() in tuya_driver.cpp).
+        esp_matter_attr_val_t saved_setpoint = esp_matter_invalid(NULL);
+        attribute_t *setpoint_attr = esp_matter::attribute::get(cluster, Thermostat::Attributes::OccupiedHeatingSetpoint::Id);
+        if (setpoint_attr && esp_matter::attribute::get_val(setpoint_attr, &saved_setpoint) == ESP_OK) {
+            app_driver_thermostat_set_saved_setpoint(saved_setpoint.val.i16);
+        }
+
         // FeatureMap and ControlSequenceOfOperation come from thermostat_config above. Don't
         // attribute::update() them here: a changed value is reported, which crashes before
         // esp_matter::start() (first boot after an erase or factory reset).

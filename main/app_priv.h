@@ -7,7 +7,8 @@
 #include "esp_openthread_types.h"
 #endif
 
-// PIN CONFIG (Non-Conflicting with Console)
+// UART to the heater's MCU, on the module's TX/RX pads. Those are also the console's pins
+// (UART0), so boot messages reach the MCU until the driver takes the pins over.
 #define TUYA_TX_PIN 16
 #define TUYA_RX_PIN 17
 
@@ -20,6 +21,7 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
                                       uint32_t attribute_id, esp_matter_attr_val_t *val);
 
 esp_err_t app_driver_thermostat_set_defaults(uint16_t endpoint_id);
+void app_driver_thermostat_set_saved_setpoint(int16_t centi_c);
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #define ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG() { .radio_mode = RADIO_MODE_NATIVE, }

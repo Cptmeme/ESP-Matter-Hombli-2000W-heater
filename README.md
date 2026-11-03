@@ -14,9 +14,9 @@ It replaces the original Wi-Fi firmware with a custom C++ application running on
 
 * **Connectivity:** **Matter over Thread** (Requires a Thread Border Router like HomePod Mini, Apple TV 4K, or Nest Hub v2) (can be adapted to support matter over wifi).
 * **Dual Endpoints:**
-    1.  **Thermostat:** Controls Power, Target Temperature (5-35°C), and monitors Room Temperature.
-    2.  **Screen Switch:** A separate On/Off switch to control the device's LED display.
-* **Smart "Atomic" Startup:** Implements a custom "Power-On + Delay + Force High Mode" sequence to prevent the heater from waking up in "Eco" mode (a hardware limitation of this specific heater).
+    1.  **Thermostat:** Controls Power, Target Temperature (7-30°C, the Matter default limits), and monitors Room Temperature.
+    2.  **Screen Switch:** A separate On/Off switch to control the device's LED display, which always shows the display's real state. Turning the heater off turns the display on, and it stays on after the heater is turned back on until you turn it off with this switch, the button on the heater or the remote. While the heater is off, the display can't be turned off.
+* **Restore After a Power Cut:** After losing power the heater stays off, comes back on in Anti-frost, and resets its setpoint to 25°C when it leaves Anti-frost. So the first time it is on after a restart, the firmware sets Comfort and then your last setpoint. It never turns the heater on by itself, and leaves it alone if it kept its settings (for example after an OTA restart).
 * **Inverted Logic Handling:** Automatically handles the inverted logic for the screen status (where Tuya sends `0` for ON).
 * **Factory Reset:** Toggle the physical power button 10 times rapidly to factory reset the Matter credentials.
 
@@ -141,7 +141,7 @@ For reference, the internal mapping handled by `tuya_driver.cpp`:
 | **1** | Power | `1`=On, `0`=Off |
 | **2** | Target Temp | Integer |
 | **3** | Current Temp | Integer |
-| **4** | Mode | `0`=High, `1`=Low, `2`=Eco |
+| **4** | Mode | `0`=Comfort, `1`=Eco, `2`=Anti-frost |
 | **101** | Screen | **Inverted:** `0`=On, `1`=Off |
 
 ---

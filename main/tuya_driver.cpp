@@ -13,6 +13,13 @@ static const char *TAG = "TUYA_DRIVER";
 
 #define BAUD_RATE 9600
 
+// Restore after a power cut (see RunRestore)
+#define RESTORE_WAKE_US   300000    // Turned on from Matter: let the MCU wake before the first write
+#define RESTORE_SETTLE_US 500000    // Turned on at the heater: let it settle before asking its mode
+#define RESTORE_GAP_US    300000    // Between comfort being confirmed and the setpoint write
+#define RESTORE_WAIT_US   500000    // Wait for a report after a write or a query
+#define RESTORE_MAX_TRIES 5
+
 TuyaHeaterDriver::TuyaHeaterDriver() {
     m_callback = nullptr;
     m_reset_callback = nullptr;
@@ -21,7 +28,7 @@ TuyaHeaterDriver::TuyaHeaterDriver() {
     m_state.power = false;
     m_state.target_temp = 22;
     m_state.current_temp = 20;
-    m_state.mode = MODE_HIGH;
+    m_state.mode = MODE_COMFORT;
     m_state.screen_on = true;
 
     // Init Buffer Counter
@@ -31,6 +38,19 @@ TuyaHeaterDriver::TuyaHeaterDriver() {
     // Reset detection init
     last_toggle_time = 0;
     toggle_count = 0;
+
+    // Restore after a power cut
+    m_restore = RESTORE_ARMED;
+    m_heat_request = false;
+    m_desired_temp = m_state.target_temp;
+    m_have_report = false;
+    m_restore_due = 0;
+    m_restore_tries = 0;
+    m_restore_query_sent = false;
+    m_reported_mode = -1;
+    m_reported_temp = -1;
+    m_mode_seen = false;
+    m_temp_seen = false;
 }
 
 esp_err_t TuyaHeaterDriver::Init(int tx_pin, int rx_pin) {
@@ -162,6 +182,7 @@ void TuyaHeaterDriver::ProcessPacket(const uint8_t *packet, int len) {
     
     int pos = 6;
     int end = len - 1;
+    bool first = !m_have_report.exchange(true);
     bool changed = false;
     
     while (pos < end) {
@@ -204,12 +225,18 @@ void TuyaHeaterDriver::ProcessPacket(const uint8_t *packet, int len) {
             }
         }
         else if (dp_id == DP_SET_TEMP) {
-            if (m_state.target_temp != val) { m_state.target_temp = val; changed = true; }
+            m_reported_temp = val;
+            m_temp_seen = true;
+            // Until the restore has finished this can be the heater's power-on default,
+            // which must not replace the saved setpoint in Matter.
+            if (m_restore.load() == RESTORE_DONE && m_state.target_temp != val) { m_state.target_temp = val; changed = true; }
         }
         else if (dp_id == DP_CUR_TEMP) {
             if (m_state.current_temp != val) { m_state.current_temp = val; changed = true; }
         }
         else if (dp_id == DP_MODE) {
+            m_reported_mode = val;
+            m_mode_seen = true;
             if (m_state.mode != val) { m_state.mode = val; changed = true; }
         }
         else if (dp_id == DP_SCREEN) {
@@ -223,7 +250,9 @@ void TuyaHeaterDriver::ProcessPacket(const uint8_t *packet, int len) {
         pos += 4 + data_len;
     }
     
-    if (changed) NotifyStateChange();
+    // The first report always syncs Matter: after a power cut the heater is off, while
+    // Matter may still remember Heat, and no value has changed from the driver's defaults.
+    if (changed || first) NotifyStateChange();
 }
 
 void TuyaHeaterDriver::NotifyStateChange() {
@@ -236,13 +265,17 @@ void TuyaHeaterDriver::SetPower(bool on) {
     m_state.power = on;
     NotifyStateChange();
 }
-void TuyaHeaterDriver::SetTemp(int temp) {
+void TuyaHeaterDriver::WriteTemp(int temp) {
     uint8_t val[4];
     val[0] = (temp >> 24) & 0xFF;
     val[1] = (temp >> 16) & 0xFF;
     val[2] = (temp >> 8) & 0xFF;
     val[3] = temp & 0xFF;
     SendCommand(DP_SET_TEMP, 0x02, val, 4);
+}
+void TuyaHeaterDriver::SetTemp(int temp) {
+    m_desired_temp = temp;
+    WriteTemp(temp);
     m_state.target_temp = temp;
     NotifyStateChange();
 }
@@ -258,6 +291,138 @@ void TuyaHeaterDriver::SetScreen(bool on) {
     SendCommand(DP_SCREEN, 0x01, &val, 1);
     m_state.screen_on = on;
     NotifyStateChange();
+}
+
+// --- RESTORE AFTER A POWER CUT ---
+// A power cut leaves the heater off. Once turned on it is in anti-frost, which has no
+// setpoint, and leaving anti-frost resets the setpoint to 25 C. So, the first time the
+// heater is on after a boot:
+//   - Turned on from Matter: set comfort, then the saved setpoint.
+//   - Turned on at the heater, or already on: the same if it reports anti-frost. Any other
+//     mode means it kept its settings (only the ESP restarted), so nothing is written.
+// This never writes DP1, so the heater stays off until someone turns it on. It runs once
+// per boot, so anti-frost chosen on the heater later on is left alone.
+
+void TuyaHeaterDriver::SetSavedTemp(int temp) {
+    m_desired_temp = temp;
+    m_state.target_temp = temp;
+}
+
+void TuyaHeaterDriver::TurnOn() {
+    if (m_restore.load() == RESTORE_DONE) {
+        // Keeps its blocking delay: a Matter setpoint write that follows stays 300 ms behind DP1
+        SetPowerAndMode(true, MODE_COMFORT);
+    } else {
+        SetPower(true);
+        m_heat_request = true;
+    }
+}
+
+void TuyaHeaterDriver::StartRestoreStep(restore_step_t step, int64_t delay_us) {
+    m_restore = step;
+    m_restore_tries = 0;
+    m_restore_query_sent = false;
+    m_restore_due = esp_timer_get_time() + delay_us;
+}
+
+void TuyaHeaterDriver::FinishRestore() {
+    m_restore = RESTORE_DONE;
+    // From here on the heater's setpoint counts again
+    if (m_reported_temp >= 0 && m_state.target_temp != m_reported_temp) {
+        m_state.target_temp = m_reported_temp;
+        NotifyStateChange();
+    }
+}
+
+void TuyaHeaterDriver::RunRestore() {
+    bool heat = m_heat_request.exchange(false);
+    int64_t now = esp_timer_get_time();
+    restore_step_t step = m_restore.load();
+
+    if (step == RESTORE_DONE) {
+        if (heat) SetMode(MODE_COMFORT);   // Finished just as a Heat command came in
+        return;
+    }
+
+    if (heat && (step == RESTORE_ARMED || step == RESTORE_CHECK_MODE)) {
+        ESP_LOGI(TAG, "Restore: first Heat since boot, setting comfort and %d C", m_desired_temp.load());
+        StartRestoreStep(RESTORE_SET_MODE, RESTORE_WAKE_US);
+        return;
+    }
+
+    if (step == RESTORE_ARMED) {
+        if (m_state.power) StartRestoreStep(RESTORE_CHECK_MODE, RESTORE_SETTLE_US);
+        return;
+    }
+
+    if (step == RESTORE_CHECK_MODE) {
+        if (!m_state.power) {
+            m_restore = RESTORE_ARMED;
+            return;
+        }
+        // Only a report after our query counts: an earlier one can predate the turn-on
+        if (m_restore_tries > 0 && m_mode_seen) {
+            if (m_reported_mode == MODE_ANTIFROST) {
+                ESP_LOGW(TAG, "Restore: heater is in anti-frost, setting comfort and %d C", m_desired_temp.load());
+                StartRestoreStep(RESTORE_SET_MODE, RESTORE_GAP_US);
+            } else {
+                ESP_LOGI(TAG, "Restore: heater kept its settings (mode %d)", m_reported_mode);
+                FinishRestore();
+            }
+            return;
+        }
+        if (now < m_restore_due) return;
+        if (m_restore_tries >= RESTORE_MAX_TRIES) {
+            ESP_LOGW(TAG, "Restore: heater did not report its mode, giving up");
+            FinishRestore();
+            return;
+        }
+        m_restore_tries++;
+        m_mode_seen = false;
+        SendHeartbeat();
+        m_restore_due = now + RESTORE_WAIT_US;
+        return;
+    }
+
+    // RESTORE_SET_MODE and RESTORE_SET_TEMP: write, ask for a report if none comes, write again
+    bool is_mode = (step == RESTORE_SET_MODE);
+    int want = is_mode ? MODE_COMFORT : m_desired_temp.load();
+    bool seen = is_mode ? m_mode_seen : m_temp_seen;
+    int got = is_mode ? m_reported_mode : m_reported_temp;
+
+    if (m_restore_tries > 0 && seen && got == want) {
+        if (is_mode) {
+            StartRestoreStep(RESTORE_SET_TEMP, RESTORE_GAP_US);
+        } else {
+            ESP_LOGI(TAG, "Restore: done, comfort at %d C", want);
+            FinishRestore();
+        }
+        return;
+    }
+    if (now < m_restore_due) return;
+
+    if (m_restore_tries > 0 && !m_restore_query_sent) {
+        m_restore_query_sent = true;
+        SendHeartbeat();
+    } else if (m_restore_tries < RESTORE_MAX_TRIES) {
+        m_restore_tries++;
+        m_restore_query_sent = false;
+        m_mode_seen = false;
+        m_temp_seen = false;
+        if (is_mode) {
+            SetMode(MODE_COMFORT);
+        } else {
+            WriteTemp(want);
+        }
+    } else if (m_state.power) {
+        ESP_LOGW(TAG, "Restore: heater did not take the %s, giving up", is_mode ? "mode" : "setpoint");
+        FinishRestore();   // Matter shows the heater's real values
+        return;
+    } else {
+        m_restore = RESTORE_ARMED;   // Turned off meanwhile: try again at the next turn-on
+        return;
+    }
+    m_restore_due = now + RESTORE_WAIT_US;
 }
 
 void TuyaHeaterDriver::SetStateCallback(tuya_state_change_cb_t cb) {

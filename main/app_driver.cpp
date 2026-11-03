@@ -1,6 +1,7 @@
 #include <esp_log.h>
 #include <stdlib.h>
 #include <string.h>
+#include <atomic>
 #include <esp_matter.h>
 #include <app_priv.h>
 #include <app/reporting/reporting.h> 
@@ -22,7 +23,10 @@ extern uint16_t screen_endpoint_id;
 static TuyaHeaterDriver heater;
 
 // Global Temp for AAI
-int16_t g_current_temp_int = 2000; 
+int16_t g_current_temp_int = 2000;
+
+// Set once esp_matter::start() has returned
+static std::atomic<bool> s_matter_started{false};
 
 #define BUTTON_GPIO_PIN 23
 
@@ -31,10 +35,13 @@ static void tuya_poll_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Tuya Poll Task Started");
     while (1) {
-        heater.Poll(); 
-        
+        heater.Poll();
+        heater.RunRestore();
+
+        // A pass takes about 100 ms: ask every 2 s until the heater first answers, then
+        // every 20 s. Not before Matter is up, as its answer gets reported to Matter.
         static int ticks = 0;
-        if (ticks++ > 200) { 
+        if (s_matter_started && ticks++ > (heater.HasReport() ? 200 : 20)) {
             heater.SendHeartbeat();
             ticks = 0;
         }
@@ -84,7 +91,8 @@ static void AppDriverUpdateTask(intptr_t context)
 
 static void tuya_state_change_callback(const heater_state_t *state)
 {
-    if (thermostat_endpoint_id == 0) return;
+    // Reporting before esp_matter::start() has finished can crash (see app_main.cpp)
+    if (!s_matter_started) return;
     AppEventData *data = (AppEventData *)malloc(sizeof(AppEventData));
     if (data) {
         data->state = *state;
@@ -106,8 +114,8 @@ static esp_err_t app_driver_thermostat_set_value(void *handle, esp_matter_attr_v
         if (mode == (uint8_t)Thermostat::SystemModeEnum::kOff) {
             heater.SetPower(false);
         } else {
-            // Turn ON + Force High Mode (Combined Packet)
-            heater.SetPowerAndMode(true, MODE_HIGH);
+            // Turn ON + force comfort (and the saved setpoint, the first time after a boot)
+            heater.TurnOn();
         }
     }
     else if (attribute_id == Thermostat::Attributes::OccupiedHeatingSetpoint::Id) {
@@ -133,7 +141,21 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
     return ESP_OK;
 }
 
-esp_err_t app_driver_thermostat_set_defaults(uint16_t endpoint_id) { return ESP_OK; }
+esp_err_t app_driver_thermostat_set_defaults(uint16_t endpoint_id)
+{
+    // Matter is up: reports can go out, starting with anything the heater already sent
+    s_matter_started = true;
+    if (heater.HasReport()) {
+        heater_state_t state = heater.GetState();
+        tuya_state_change_callback(&state);
+    }
+    return ESP_OK;
+}
+
+void app_driver_thermostat_set_saved_setpoint(int16_t centi_c)
+{
+    heater.SetSavedTemp(centi_c / 100);
+}
 
 app_driver_handle_t app_driver_thermostat_init()
 {
