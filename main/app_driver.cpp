@@ -36,15 +36,8 @@ static void tuya_poll_task(void *pvParameters)
     ESP_LOGI(TAG, "Tuya Poll Task Started");
     while (1) {
         heater.Poll();
-        heater.RunRestore();
-
-        // A pass takes about 100 ms: ask every 2 s until the heater first answers, then
-        // every 20 s. Not before Matter is up, as its answer gets reported to Matter.
-        static int ticks = 0;
-        if (s_matter_started && ticks++ > (heater.HasReport() ? 200 : 20)) {
-            heater.SendHeartbeat();
-            ticks = 0;
-        }
+        // Status queries only once Matter is up, as the answers get reported to Matter
+        heater.Service(s_matter_started);
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -112,7 +105,7 @@ static esp_err_t app_driver_thermostat_set_value(void *handle, esp_matter_attr_v
     if (attribute_id == Thermostat::Attributes::SystemMode::Id) {
         uint8_t mode = val->val.u8;
         if (mode == (uint8_t)Thermostat::SystemModeEnum::kOff) {
-            heater.SetPower(false);
+            heater.TurnOff();
         } else {
             // Turn ON + force comfort (and the saved setpoint, the first time after a boot)
             heater.TurnOn();

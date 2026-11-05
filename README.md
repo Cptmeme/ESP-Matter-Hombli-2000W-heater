@@ -17,6 +17,7 @@ It replaces the original Wi-Fi firmware with a custom C++ application running on
     1.  **Thermostat:** Controls Power, Target Temperature (7-30°C, the Matter default limits), and monitors Room Temperature.
     2.  **Screen Switch:** A separate On/Off switch to control the device's LED display, which always shows the display's real state. Turning the heater off turns the display on, and it stays on after the heater is turned back on until you turn it off with this switch, the button on the heater or the remote. While the heater is off, the display can't be turned off.
 * **Restore After a Power Cut:** After losing power the heater stays off, comes back on in Anti-frost, and resets its setpoint to 25°C when it leaves Anti-frost. So the first time it is on after a restart, the firmware sets Comfort and then your last setpoint. It never turns the heater on by itself, and leaves it alone if it kept its settings (for example after an OTA restart).
+* **Scenes and Automations:** Apple Home sends a scene as several commands at once, such as a temperature, Heat and Off. The firmware sends them to the heater one at a time and waits for the heater to confirm each, so none gets lost. If Off and Heat arrive within 2 seconds of each other, Off wins. A temperature set while the heater is off is sent when it next turns on.
 * **Inverted Logic Handling:** Automatically handles the inverted logic for the screen status (where Tuya sends `0` for ON).
 * **Factory Reset:** Toggle the physical power button 10 times rapidly to factory reset the Matter credentials.
 
