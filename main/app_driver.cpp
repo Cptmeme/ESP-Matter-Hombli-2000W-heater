@@ -89,7 +89,9 @@ static void tuya_state_change_callback(const heater_state_t *state)
     AppEventData *data = (AppEventData *)malloc(sizeof(AppEventData));
     if (data) {
         data->state = *state;
-        chip::DeviceLayer::PlatformMgr().ScheduleWork(AppDriverUpdateTask, (intptr_t)data);
+        if (chip::DeviceLayer::PlatformMgr().ScheduleWork(AppDriverUpdateTask, (intptr_t)data) != CHIP_NO_ERROR) {
+            free(data);   // Not queued, so AppDriverUpdateTask won't free it
+        }
     }
 }
 
@@ -166,8 +168,11 @@ static void app_driver_button_toggle_cb(void *arg, void *data)
     ESP_LOGI(TAG, "Button: Commissioning Window");
     chip::CommissioningWindowManager & commissionMgr = chip::Server::GetInstance().GetCommissioningWindowManager();
     if (!commissionMgr.IsCommissioningWindowOpen()) {
-        commissionMgr.OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(300),
-                                                   chip::CommissioningWindowAdvertisement::kDnssdOnly);
+        CHIP_ERROR err = commissionMgr.OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(300),
+                                                                    chip::CommissioningWindowAdvertisement::kDnssdOnly);
+        if (err != CHIP_NO_ERROR) {
+            ESP_LOGE(TAG, "Failed to open commissioning window, err:%" CHIP_ERROR_FORMAT, err.Format());
+        }
     }
 }
 

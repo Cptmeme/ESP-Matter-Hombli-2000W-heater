@@ -51,8 +51,10 @@ The firmware uses the standard UART pins on the module:
 ## ⚙️ Installation & Build
 
 ### Prerequisites
-* ESP-IDF v5.5.x (built with v5.5.4)
-* ESP-Matter SDK
+* ESP-IDF v6.0.2
+* ESP-Matter SDK v1.6.1 (release/v1.6.1)
+
+Versions up to 1.5 were built with ESP-IDF v5.5.4 and ESP-Matter v1.5.
 
 ### Configuration
 This project requires specific SDK settings to support multiple endpoints and the custom partition table.
@@ -119,6 +121,8 @@ The 1.5 MB image takes about 12 minutes over Thread.
 After the download the heater restarts into the new version and keeps it once it has run for a minute while attached to the Thread network. If it doesn't get there within 5 minutes, or crashes before that, the bootloader automatically returns to the previous version.
 
 Rollback needs the bootloader from this build, and the bootloader can only be written over serial. A heater that has only been updated over the air still updates fine, it just won't roll back.
+
+The bootloader can start apps built with newer ESP-IDF versions, but not older ones. A heater flashed over serial with version 1.6 or later (ESP-IDF 6) can't be updated back to 1.5 or earlier (ESP-IDF 5.5); one flashed with an earlier version can take 1.6 over the air.
 
 ---
 
