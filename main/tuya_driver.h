@@ -102,6 +102,7 @@ private:
     int64_t m_last_tx_at;
     int64_t m_power_on_at;
     int64_t m_last_off_at;
+    int64_t m_screen_at;            // When the screen command waiting to be written arrived
     int64_t m_next_query_at;
 
     // Restore after a power cut (see RunRestore)

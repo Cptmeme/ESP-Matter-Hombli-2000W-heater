@@ -303,6 +303,7 @@ extern "C" void app_main()
 #endif
 #endif // CONFIG_ENABLE_SET_CERT_DECLARATION_API
 
+    app_device_info_init();
     esp_matter::start(app_event_cb);
     app_driver_thermostat_set_defaults(thermostat_endpoint_id);
     app_ota_verify_start();

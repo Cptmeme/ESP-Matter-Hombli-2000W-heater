@@ -18,6 +18,7 @@ static const char *TAG = "TUYA_DRIVER";
 #define WRITE_MAX_TRIES   5
 #define WAKE_US           300000    // After the heater comes on, before writing its mode
 #define OFF_WINS_US       2000000   // Heat this soon after Off is ignored (see ApplyQueued)
+#define SCREEN_HOLD_US    2000000   // While off, a screen command waits this long for Heat (see RunWriter)
 
 // Status queries
 #define QUERY_FIRST_US    2000000   // Until the heater first answers
@@ -62,6 +63,7 @@ TuyaHeaterDriver::TuyaHeaterDriver() {
     m_last_tx_at = -FRAME_GAP_US;
     m_power_on_at = 0;
     m_last_off_at = -10LL * OFF_WINS_US;
+    m_screen_at = 0;
     m_next_query_at = 0;
 
     m_restore = RESTORE_ARMED;
@@ -373,19 +375,13 @@ void TuyaHeaterDriver::ApplyQueued() {
             m_want[W_TEMP] = {true, c.value};   // Sent once the heater is on
             break;
 
-        case CMD_SCREEN: {
-            // The heater ignores the screen while it is off and keeps it on, so the switch
-            // goes back to showing that rather than waiting for writes that can't work
-            bool off = m_want[W_POWER].active ? m_want[W_POWER].value == 0 : m_reported[W_POWER] == 0;
-            if (off) {
-                ESP_LOGI(TAG, "Matter: screen %s ignored, the heater is off", c.value ? "on" : "off");
-                m_want[W_SCREEN].active = false;
-                SyncFromReported(W_SCREEN);
-            } else {
-                m_want[W_SCREEN] = {true, c.value};
-            }
+        case CMD_SCREEN:
+            // Written last, once the heater is on: it ignores the screen while it is off, and
+            // a scene can send the screen command before its Heat (see RunWriter)
+            ESP_LOGI(TAG, "Matter: screen %s", c.value ? "on" : "off");
+            m_want[W_SCREEN] = {true, c.value};
+            m_screen_at = c.at;
             break;
-        }
         }
     }
 }
@@ -537,7 +533,11 @@ void TuyaHeaterDriver::RunWriter(int64_t now) {
         return;
     }
     if (m_want[W_SCREEN].active) {
-        if (m_reported[W_POWER] == 0) {   // Turned off meanwhile: see CMD_SCREEN
+        if (m_reported[W_POWER] == 0) {
+            // Off, so the heater would ignore it and keep the screen on. Wait a moment in case
+            // a Heat is on its way; if not, the switch goes back to showing the real screen.
+            if (now - m_screen_at < SCREEN_HOLD_US) return;
+            ESP_LOGI(TAG, "Screen %s dropped, the heater stayed off", m_want[W_SCREEN].value ? "on" : "off");
             m_want[W_SCREEN].active = false;
             SyncFromReported(W_SCREEN);
             return;

@@ -23,6 +23,9 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
 esp_err_t app_driver_thermostat_set_defaults(uint16_t endpoint_id);
 void app_driver_thermostat_set_saved_setpoint(int16_t centi_c);
 
+// Manufacturer, model and serial number for Matter (device_info.cpp); call before esp_matter::start()
+void app_device_info_init();
+
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #define ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG() { .radio_mode = RADIO_MODE_NATIVE, }
 #define ESP_OPENTHREAD_DEFAULT_HOST_CONFIG() { .host_connection_mode = HOST_CONNECTION_MODE_NONE, }
